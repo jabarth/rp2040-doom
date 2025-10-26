@@ -91,6 +91,16 @@ int main(int argc, char **argv)
 #if LIB_PICO_STDIO
     stdio_init_all();
 #endif
+
+    // --- DEBUG: Serial and LED initialized ---
+    printf("DEBUG: Serial and LED initialized. Starting DOOM...\n");
+    // --- DEBUG LED HEARTBEAT (GP25) ---
+    gpio_init(25);
+    gpio_set_dir(25, GPIO_OUT);
+    gpio_put(25, 1); // LED ON: Code running past stdio_init_all()
+    busy_wait_ms(500);
+    gpio_put(25, 0); // LED OFF
+
 #if PICO_BUILD
     I_Init();
 #endif

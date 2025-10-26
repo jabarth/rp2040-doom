@@ -581,15 +581,15 @@ function(add_doom_tiny SUFFIX RENDER_LIB)
         target_compile_options(doom_tiny${SUFFIX} PRIVATE -g)
     endif()
     target_link_libraries(doom_tiny${SUFFIX} PRIVATE ${RENDER_LIB})
+    target_link_libraries(doom_tiny${SUFFIX} PRIVATE pico_sync)
     set(PICO_HACK 0)
     set(STAMP_HACK 0)
     if (PICO_HACK)
         target_compile_definitions(doom_tiny${SUFFIX} PRIVATE
                 PICO_AUDIO_I2S_DATA_PIN=20
                 PICO_AUDIO_I2S_CLOCK_PIN_BASE=21
-                NO_USE_UART=1
-                )
-        pico_enable_stdio_uart(doom_tiny${SUFFIX} 0)
+        )
+        pico_enable_stdio_uart(doom_tiny${SUFFIX} 1)
     elseif(STAMP_HACK)
         target_compile_definitions(doom_tiny${SUFFIX} PRIVATE
                 PICO_AUDIO_I2S_DATA_PIN=22
@@ -650,6 +650,7 @@ if (PICO_SDK)
         add_doom_tiny(_usb render_newhope)
         target_link_libraries(doom_tiny_usb PRIVATE tiny_settings pico_cd)
         target_compile_definitions(doom_tiny_usb PRIVATE
+                ST7796_DRIVER=1
                 USB_SUPPORT=1
                 TINY_WAD_ADDR=0x10042000 # ugh tinyusb is >8K currently!!
         )

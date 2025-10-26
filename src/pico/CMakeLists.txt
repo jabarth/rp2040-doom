@@ -7,6 +7,8 @@ target_sources(common_pico INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}/i_timer.c
         ${CMAKE_CURRENT_LIST_DIR}/i_video.c
         ${CMAKE_CURRENT_LIST_DIR}/stubs.c
+        ${CMAKE_CURRENT_LIST_DIR}/st7796s_init.c
+        ${CMAKE_CURRENT_LIST_DIR}/st7796s_spi.c
 
         ${CMAKE_CURRENT_LIST_DIR}/i_picosound.c
 )
@@ -22,12 +24,14 @@ if (PICO_ON_DEVICE)
             PICO_HEAP_SIZE=0
             USE_ZONE_FOR_MALLOC=1
     )
-    target_link_libraries(common_pico INTERFACE  hardware_i2c)
+    target_link_libraries(common_pico INTERFACE  hardware_i2c hardware_spi)
 endif()
 target_include_directories(common_pico INTERFACE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_CURRENT_LIST_DIR}/..
         ${CMAKE_CURRENT_LIST_DIR}/../../textscreen
+        ${CMAKE_CURRENT_LIST_DIR}/../hw_config
+        ${PICO_SDK_PATH}/src/boards/include/boards
         )
 
 target_compile_definitions(common_pico INTERFACE

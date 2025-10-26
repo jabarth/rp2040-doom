@@ -57,6 +57,10 @@
 #include "hardware/structs/xip_ctrl.h"
 #endif
 
+#include "hardware/gpio.h"
+#include "pico/stdlib.h"
+#include "st7796s_init.h"
+
 #define YELLOW_SUBMARINE 0
 #define SUPPORT_TEXT 1
 #if SUPPORT_TEXT
@@ -1128,6 +1132,13 @@ void I_InitGraphics(void)
     multicore_launch_core1(core1);
     // wait for core1 launch as it may do malloc and we have no mutex around that
     sem_acquire_blocking(&core1_launch);
+
+#ifdef ST7796_DRIVER
+    extern void st7796s_spi_init();
+    st7796s_spi_init();
+    st7796s_init();
+#endif
+
 #if USE_ZONE_FOR_MALLOC
     disallow_core1_malloc = true;
 #endif

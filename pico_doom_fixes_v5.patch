@@ -1,0 +1,228 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index a7529243..33e17dec 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -581,15 +581,15 @@ function(add_doom_tiny SUFFIX RENDER_LIB)
+         target_compile_options(doom_tiny${SUFFIX} PRIVATE -g)
+     endif()
+     target_link_libraries(doom_tiny${SUFFIX} PRIVATE ${RENDER_LIB})
++    target_link_libraries(doom_tiny${SUFFIX} PRIVATE pico_sync)
+     set(PICO_HACK 0)
+     set(STAMP_HACK 0)
+     if (PICO_HACK)
+         target_compile_definitions(doom_tiny${SUFFIX} PRIVATE
+                 PICO_AUDIO_I2S_DATA_PIN=20
+                 PICO_AUDIO_I2S_CLOCK_PIN_BASE=21
+-                NO_USE_UART=1
+-                )
+-        pico_enable_stdio_uart(doom_tiny${SUFFIX} 0)
++        )
++        pico_enable_stdio_uart(doom_tiny${SUFFIX} 1)
+     elseif(STAMP_HACK)
+         target_compile_definitions(doom_tiny${SUFFIX} PRIVATE
+                 PICO_AUDIO_I2S_DATA_PIN=22
+@@ -650,6 +650,7 @@ if (PICO_SDK)
+         add_doom_tiny(_usb render_newhope)
+         target_link_libraries(doom_tiny_usb PRIVATE tiny_settings pico_cd)
+         target_compile_definitions(doom_tiny_usb PRIVATE
++                ST7796_DRIVER=1
+                 USB_SUPPORT=1
+                 TINY_WAD_ADDR=0x10042000 # ugh tinyusb is >8K currently!!
+         )
+diff --git a/src/doom/p_saveg.c b/src/doom/p_saveg.c
+index 97d8a6ca..18a3c4bd 100644
+--- a/src/doom/p_saveg.c
++++ b/src/doom/p_saveg.c
+@@ -2766,7 +2766,7 @@ boolean __noinline P_SaveGameWriteFlashSlot(int slot, const uint8_t *buffer, uin
+     pd_start_save_pause();
+ //    printf("Need to add %p->%p (+%04x)\n", prev_slot_bottom - 4 - size, prev_slot_bottom, size + 8);
+     if (last_slot > slot) {
+-        assert(slots[last_slot.data]);
++        assert(slots[last_slot].data);
+         const uint8_t *from_top = slots[slot].data ? slots[slot].data - 4 : prev_slot_bottom;
+         const uint8_t *from_bottom = slots[last_slot].data - 4;
+         const uint8_t *to_top = prev_slot_bottom;
+diff --git a/src/i_main.c b/src/i_main.c
+index 13fe30a5..19984e1d 100644
+--- a/src/i_main.c
++++ b/src/i_main.c
+@@ -91,6 +91,16 @@ int main(int argc, char **argv)
+ #if LIB_PICO_STDIO
+     stdio_init_all();
+ #endif
++
++    // --- DEBUG: Serial and LED initialized ---
++    printf("DEBUG: Serial and LED initialized. Starting DOOM...\n");
++    // --- DEBUG LED HEARTBEAT (GP25) ---
++    gpio_init(25);
++    gpio_set_dir(25, GPIO_OUT);
++    gpio_put(25, 1); // LED ON: Code running past stdio_init_all()
++    busy_wait_ms(500);
++    gpio_put(25, 0); // LED OFF
++
+ #if PICO_BUILD
+     I_Init();
+ #endif
+diff --git a/src/pico/CMakeLists.txt b/src/pico/CMakeLists.txt
+index 4c470b0f..e0e483db 100644
+--- a/src/pico/CMakeLists.txt
++++ b/src/pico/CMakeLists.txt
+@@ -7,6 +7,8 @@ target_sources(common_pico INTERFACE
+         ${CMAKE_CURRENT_LIST_DIR}/i_timer.c
+         ${CMAKE_CURRENT_LIST_DIR}/i_video.c
+         ${CMAKE_CURRENT_LIST_DIR}/stubs.c
++        ${CMAKE_CURRENT_LIST_DIR}/st7796s_init.c
++        ${CMAKE_CURRENT_LIST_DIR}/st7796s_spi.c
+ 
+         ${CMAKE_CURRENT_LIST_DIR}/i_picosound.c
+ )
+@@ -22,12 +24,14 @@ if (PICO_ON_DEVICE)
+             PICO_HEAP_SIZE=0
+             USE_ZONE_FOR_MALLOC=1
+     )
+-    target_link_libraries(common_pico INTERFACE  hardware_i2c)
++    target_link_libraries(common_pico INTERFACE  hardware_i2c hardware_spi)
+ endif()
+ target_include_directories(common_pico INTERFACE
+         ${CMAKE_CURRENT_LIST_DIR}
+         ${CMAKE_CURRENT_LIST_DIR}/..
+         ${CMAKE_CURRENT_LIST_DIR}/../../textscreen
++        ${CMAKE_CURRENT_LIST_DIR}/../hw_config
++        ${PICO_SDK_PATH}/src/boards/include/boards
+         )
+ 
+ target_compile_definitions(common_pico INTERFACE
+diff --git a/src/pico/i_video.c b/src/pico/i_video.c
+index 15bb9d7c..bd8c213c 100644
+--- a/src/pico/i_video.c
++++ b/src/pico/i_video.c
+@@ -57,6 +57,10 @@
+ #include "hardware/structs/xip_ctrl.h"
+ #endif
+ 
++#include "hardware/gpio.h"
++#include "pico/stdlib.h"
++#include "st7796s_init.h"
++
+ #define YELLOW_SUBMARINE 0
+ #define SUPPORT_TEXT 1
+ #if SUPPORT_TEXT
+@@ -1128,6 +1132,13 @@ void I_InitGraphics(void)
+     multicore_launch_core1(core1);
+     // wait for core1 launch as it may do malloc and we have no mutex around that
+     sem_acquire_blocking(&core1_launch);
++
++#ifdef ST7796_DRIVER
++    extern void st7796s_spi_init();
++    st7796s_spi_init();
++    st7796s_init();
++#endif
++
+ #if USE_ZONE_FOR_MALLOC
+     disallow_core1_malloc = true;
+ #endif
+diff --git a/src/pico/st7796s_init.c b/src/pico/st7796s_init.c
+new file mode 100644
+index 00000000..57286240
+--- /dev/null
++++ b/src/pico/st7796s_init.c
+@@ -0,0 +1,9 @@
++#include "st7796s_init.h"
++#include <stdio.h>
++#include "pico/stdlib.h"
++#include "hardware/gpio.h"
++
++void st7796s_init() {
++    // Placeholder for display initialization
++    printf("DEBUG: st7796s_init() called.\n");
++}
+\ No newline at end of file
+diff --git a/src/pico/st7796s_init.h b/src/pico/st7796s_init.h
+new file mode 100644
+index 00000000..f59acce9
+--- /dev/null
++++ b/src/pico/st7796s_init.h
+@@ -0,0 +1,8 @@
++#ifndef ST7796S_INIT_H
++#define ST7796S_INIT_H
++
++#include <stdint.h>
++
++void st7796s_init();
++
++#endif // ST7796S_INIT_H
+\ No newline at end of file
+diff --git a/src/pico/st7796s_spi.c b/src/pico/st7796s_spi.c
+new file mode 100644
+index 00000000..21ee9d87
+--- /dev/null
++++ b/src/pico/st7796s_spi.c
+@@ -0,0 +1,43 @@
++
++#include "pico/stdlib.h"
++#include "hardware/spi.h"
++#include "PICO_GAME_HAT_EP0172.h"
++
++void lcd_write_cmd(uint8_t cmd) {
++    gpio_put(TFT_CS, 0);
++    gpio_put(TFT_DC, 0);
++    spi_write_blocking(spi0, &cmd, 1);
++    gpio_put(TFT_CS, 1);
++}
++
++void lcd_write_data(uint8_t data) {
++    gpio_put(TFT_CS, 0);
++    gpio_put(TFT_DC, 1);
++    spi_write_blocking(spi0, &data, 1);
++    gpio_put(TFT_CS, 1);
++}
++
++#include <stdio.h>
++
++void st7796s_spi_init() {
++    printf("st7796s_spi_init()\n");
++    spi_init(spi0, 40 * 1000 * 1000); // 40MHz
++    gpio_set_function(TFT_MOSI, GPIO_FUNC_SPI);
++    gpio_set_function(TFT_SCLK, GPIO_FUNC_SPI);
++
++    gpio_init(TFT_CS);
++    gpio_set_dir(TFT_CS, GPIO_OUT);
++    gpio_put(TFT_CS, 1);
++
++    gpio_init(TFT_DC);
++    gpio_set_dir(TFT_DC, GPIO_OUT);
++
++    gpio_init(TFT_RST);
++    gpio_set_dir(TFT_RST, GPIO_OUT);
++
++    // Reset the display
++    gpio_put(TFT_RST, 0);
++    sleep_ms(100);
++    gpio_put(TFT_RST, 1);
++    sleep_ms(100);
++}
+diff --git a/src/tiny_huff.c b/src/tiny_huff.c
+index ca62109f..317c05ad 100644
+--- a/src/tiny_huff.c
++++ b/src/tiny_huff.c
+@@ -264,11 +264,6 @@ const uint8_t reverse8[256] = {
+         0x0f, 0x8f, 0x4f, 0xcf, 0x2f, 0xaf, 0x6f, 0xef, 0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
+ };
+ 
+-#pragma GCC push_options
+-#if PICO_ON_DEVICE
+-#pragma GCC optimize("O3")
+-#endif
+-
+ int __not_in_flash_func(th_make_prefix_length_table)(th_decoder decoder, uint8_t *prefix_lengths) {
+     int max_length = decoder[0] / 2;
+     if (max_length > 8) max_length = 8;
+@@ -285,5 +280,4 @@ int __not_in_flash_func(th_make_prefix_length_table)(th_decoder decoder, uint8_t
+         decoder += 2;
+     }
+     return max_length;
+-}
+-#pragma GCC pop_options
+\ No newline at end of file
++}
+\ No newline at end of file
